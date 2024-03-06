@@ -1,0 +1,437 @@
+---
+title: "Coursework MAP501 2022"
+output:
+  pdf_document:
+    toc: yes
+  html_document:
+    self_contained: yes
+    highlight: textmate
+    toc: yes
+    number_sections: no
+editor_options:
+  markdown:
+    wrap: 72
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(
+  comment = "",
+  results = "hold",
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  fig.width = 4,
+  fig.height = 2.6,
+  fig.align = "center")
+
+```
+
+```{r}
+library("rio")
+library("dplyr")
+library("tidyr")
+library("magrittr")
+library("ggplot2")
+library("pROC")
+library("car")
+library("nnet")
+library("AmesHousing")
+library("janitor")
+library("here")
+library("tidyverse")
+library("corrr")
+library("ggcorrplot")
+library("effects")
+library("rcompanion")
+```
+
+```{r}
+Ames<-make_ames()
+```
+
+# 1. Data Preperatation
+a. Import the soccer.csv dataset as “footballer_data”. (2 points)
+```{r}
+footballer_data <- clean_names(read_csv(here("data/soccer.csv")))
+glimpse(footballer_data)
+```
+b. Ensure all character variables are treated as factors and where variable names have a space, rename
+the variables without these. (3 points)
+```{r}
+footballer_data <- footballer_data %>%
+  mutate_at(vars(full_name, nationality, current_club, position, birthday_gmt), 
+            list(factor))
+  
+#cleaned names when csv was read in, see 1.a
+```
+
+c. Remove the columns birthday and birthday_GMT. (2 points)
+```{r}
+footballer_data <- footballer_data %>%
+  select(-birthday, -birthday_gmt)
+```
+
+d.Remove the cases with age<=15 and age>40. (2 points)
+```{r}
+footballer_data <- footballer_data %>%
+  filter(age >= 16 & age <= 40) 
+```
+
+# 2. Linear Regression
+
+In this problem, you are going to investigate the response variable Total_Bsmt_SF in “Ames” dataset through linear regression.
+
+a. By adjusting x axis range and number of bars, create a useful histogram of Total_Bsmt_SF (Total square feet of basement area) on the full dataset. Ensure that plot titles and axis labels are clear. (4 points)
+```{r}
+glimpse(Ames)
+
+Ames %>%
+  ggplot(aes(Total_Bsmt_SF))+
+  geom_histogram(position = "identity", bin = 30, colour = "white")+
+  labs(x="Total Basement in Square Feet",y="Frequency",
+       title="Frequency of Basements Sizes (Sqaure Feet)") +
+  xlim(0,2200)
+```
+
+b. Using “Ames” dataset to create a new dataset called “Ames2” in which you remove all cases corresponding to:
+
+  i.MS_Zoning categories of A_agr (agricultural), C_all (commercial) and I_all (industrial).
+  
+  ii.BsmtFin_Type_1 category of “No_Basement”. 
+  
+  iii.Bldg_Type category of “OneFam” and drop the unused levels from the dataset “Ames2”. (4 points)
+```{r}
+Ames2 <- Ames %>%
+  filter(BsmtFin_Type_1 != "No_Basement"& Bldg_Type != "OneFam" &
+   !(MS_Zoning %in% c("A_agr","C_all","I_all")))
+        
+Ames2$BsmtFin_Type_1 <- droplevels(Ames2$BsmtFin_Type_1)
+Ames2$Bldg_Type <- droplevels(Ames2$Bldg_Type)
+Ames2$MS_Zoning <- droplevels(Ames2$MS_Zoning)
+
+levels(Ames2$BsmtFin_Type_1)
+levels(Ames2$Bldg_Type)
+levels(Ames2$MS_Zoning)
+
+```
+
+c. Choose an appropriate plot to investigate the relationship between Bldg_Type and Total_Bsmt_SF in Ames2. (2 points)
+```{r}
+
+Ames2 %>% ggplot(aes(Bldg_Type, Total_Bsmt_SF))+
+  geom_boxplot() +
+  labs(x="building Type",y="Total Basement Size (Square Feet)",
+       title="building Type by Basements Size (Sqaure Feet)")
+  
+```
+
+d. Choose an appropriate plot to investigate the relationship between Year_Built and Total_Bsmt_SF in Ames2. Color points according to the factor Bldg_Type. Ensure your plot has a clear title, axis labels and legend. What do you notice about how Basement size has changed over time? Were there any slowdowns in construction over this period? When? Can you think why? (4 points)
+```{r}
+Ames2 %>% 
+  ggplot(aes(x=Year_Built,y=Total_Bsmt_SF,
+             colour = factor(Bldg_Type)))+
+  geom_point()+
+  labs(x = "Year Built", y = "Total Basement Space (Square Feet)") +
+  ggtitle("Relationship Between Year Built and Total Basement Space") +
+  labs(colour = "Building Type") +
+  theme(plot.title = element_text(size = 9))
+
+```
+  Basement sizes have increased more recently with duplex housing and town houses having the largest basement space in square feet. There was a slow down in construction between approximately 1920 and 1945. This could be due to world war 1 and world war 2 taking place between 1918 and 1945. Nations focuses were to defend the country rather than build new houses. 
+
+e. Why do we make these plots? Comment on your findings from these plots (1 sentence is fine). (2 points)
+  We make these plots to visualise the data which helps to get a quick overall look at potential trends.
+  
+f. Now choose an appropriate plot to investigate the relationship between Bldg_Type and Year_Built in Ames2. Why should we consider this? What do you notice? (3 points)
+```{r}
+Ames2 %>% 
+  ggplot(aes(x=Bldg_Type,y=Year_Built)) +
+  geom_boxplot() +
+  labs(x = "Building Type", y = "Year Built") +
+  ggtitle("Relationship Between Building Type and Year Built") +
+  theme(plot.title = element_text(size = 10))
+```
+ Boxplots visually disply descriptive statistics about our data. This is useful to identify trends in the data. The median and skewness of data in these plots tell us that more Duplex's, Twnhs's and TwnhsE's have been built recently compared to TwoFmCon's.
+
+g. Use the lm command to build a linear model, linmod1, of Total_Bsmt_SF as a function of the predictors Bldg_Type and Year_Built for the “Ames2” dataset. (2 points)
+```{r}
+linmod1<-lm(Total_Bsmt_SF~Year_Built + Bldg_Type ,data=Ames2)
+summary(linmod1)
+```
+
+h. State and evaluate the assumptions of the model. (6 points)
+```{r}
+library("lindia")
+linmod1 %>%
+  gg_diagnose(max.per.page = 1)
+```
+  
+   Looking at the qq plot of residuals it looks roughly like a straight line. We can also look at the histogram which looks like a normally distributed bell curve or Gaussian so the assumption of normality is met.
+  Looking at the scatterplots the data looks linear even though the data in the residuals vs Year built scatter is slightly more spread toward the later years. Therefore the assumption of linearity has been met. This spread in data could be due to a missing predictor correlated with year built not being accounted for.
+  The boxplots looking at residual vs building type are okay but the interquartile ranges are quite different, so the model is okay but not optimised. 
+ 
+
+i. Use the lm command to build a second linear model, linmod2, for Total_Bsmt_SF as a function of Bldg_Type, Year_Built and Lot_Area. (2 points)
+```{r}
+linmod2<-lm(Total_Bsmt_SF~Year_Built + Bldg_Type + Lot_Area ,data=Ames2)
+summary(linmod2)
+```
+
+j. Use anova and Adjusted R-squared to compare these two models, and decide which is a better model. (6 points)
+```{r}
+anova(linmod1,linmod2)
+
+summary(linmod1)
+
+summary(linmod2)
+```
+  The anova suggests that the second model which takes into account Lot_Area is an improvement over the first model. Model 2 was statistically significant with a p < 0.5.
+  The first model has a Multiple R-squared value of 0.334. This means that 33% of variance in total basement size in square feet (Total_Bsmt_SF) is explained by year built (Year_Built) and dwelling type (Bldg_Type). So it is explanatory, however there are other uncontrolled factors which are influencing total basement size.
+  
+   The second model has a Multiple R-squared value of 0.356. This means that 36% of variance in total basement size in square feet (Total_Bsmt_SF) is explained by year built (Year_Built), dwelling type (Bldg_Type) and lot size in square feet (Lot_Area). So it is more explanatory than the first model but only by 3% meaning that there are still uncontrolled factors which are influencing total basement size.
+  
+
+k. Construct a confidence interval and a prediction interval for the basement area of a Twnhs built in 1980, with a lot Area of 7300. Explain what these two intervals mean. (6 points)
+```{r}
+
+predict(linmod2,newdata=data.frame(Bldg_Type="Twnhs",
+                                   Year_Built=1980,Lot_Area=7300),
+                                   interval="confidence")
+#confidence interval
+
+predict(linmod2,newdata=data.frame(Bldg_Type="Twnhs",
+                                   Year_Built=1980,Lot_Area=7300),
+                                   interval="prediction")
+#prediction interval
+ 
+```
+  The confidence interval show us how 'good' our current estimate is. Whereas the prediction interval shows us a range in which a future response is likely to fall given specified predictors.
+The predicted value (fit) in our data is the same for both the confidence and predictions intervals, but the prediction interval is larger than the confidence interval.
+
+l. Now build a linear mixed model, linmod3, for Total_Bsmt_SF as a function of Year_Built,MS_Zoning and Bldg_Type. Use Neighborhood as random effect. What is the critical number to pull out from this, and what does it tell us? (4 points)
+```{r}
+library("lme4")
+linmod3 <- lmer(Total_Bsmt_SF~Year_Built+MS_Zoning+Bldg_Type+
+                (1|Neighborhood),data=Ames2)
+linmod3
+```
+  The fixed effect intercept is the critical number as it tells us that the mean basement size is -4890.652 this could be due to lots of houses not having a basement. The standard deviation and residuals are also important figures here.
+
+m. Construct 95% confidence intervals around each parameter estimate for linmod3. What does this tell us about the significant of the random effect? (3 points)
+```{r}
+confint(linmod3)
+```
+  Only the confidence interval for Year_Built contains zero, but none of the other confidence intervals contain zero. Therefore, Year_Built is not statistically significant but all the other confidence intervals are all significant at the 95% level, however the confidence intervals have wider ranges meaning that we aren't very confident in the results.
+
+n. Write out the full mathematical expression for the model in linmod2 and for the model in linmod3. Round to the nearest integer in all coefficients with modulus > 10 and to three decimal places for coefficients with modulus < 10. (4 points)
+```{r}
+library("knitr")
+summary(linmod2)
+```
+  Linmod2 equation
+  
+$$
+\begin{align}
+\mbox{E(Total Basement Space)} \sim   &-11760 + 6.509\times {\rm Year\ Built} \\ 
+&+238\times{\rm BldgType\ Duplex} + 
+                         -412\times {\rm BldgType\ Twnhs} \\ 
+&-127\times {\rm BldgType\ TwnhsE}\\
+&0.008\times {\rm Lot\ Area}, 322.
+\end{align}
+$$
+ 
+```{r}
+summary(linmod3)
+```
+
+ Linmod3 equation
+ 
+$$
+\begin{align}
+\mbox{E(Total Basement Space)} \sim{}   &-4891 + 3\times {\rm Year\ Built}\ + \\ 
+&149\times{\rm MS\ Zoning\ Residential\ High\ Density} \ + \\
+&288\times {\rm Residential\ Low\ Density}\  +\\ 
+&109\times {\rm Residential\ Medium\ Density} \ +\\ 
+&265\times {\rm Bldg\ Type\ Duplex }\ +\\
+&-63\times {\rm Bldg\ Type\ Twnhs }\ +\\
+&105\times {\rm Bldg\ Type\ TwnhsE + U.}\\
+\\
+U \sim{} N(0,\ 187)\\
+\end{align}
+$$
+
+# 3. Logistic Regression
+
+a. Do the following:
+
+i. Create a new dataset called “Ames3” that contains all data in “Ames” dataset plus a new variable “excellent_heating” that indicates if the heating quality and condition “Heating_QC” is excellent or not. (2 points)
+```{r}
+Ames3 <- Ames %>%
+  mutate(excellent_heating = Heating_QC == "Excellent")
+```
+
+ii. In “Ames3” dataset, remove all cases “3” and “4” corresponding to the Fireplaces variable. Remove all cases where Lot_Frontage is greater than 130 or smaller than 20. Drop the unused levels from .(2 points)
+iii. Save “Fireplaces” as factor in “Ames3” dataset (1 point)
+```{r}
+Ames3 <- Ames3 %>%
+  mutate_at(vars(Fireplaces),
+            list(factor)) %>%
+  filter(Fireplaces != 3 & 4) %>%
+  filter(Lot_Frontage <= 130 & Lot_Frontage >= 20)
+
+Ames3$Fireplaces <- droplevels(Ames3$Fireplaces)
+```
+
+iv. Construct a logistic regression model glmod for excellent_heating as a function of Lot_Frontage and Fireplaces for the dataset “Ames3”. (2 points)
+```{r}
+glmod <- glm(as.factor(excellent_heating)~Lot_Frontage + Fireplaces,
+             family="binomial",data=Ames3)
+summary(glmod)
+```
+
+b. Construct confidence bands for the variable excellent_heating as a function of Lot_Frontage for each number of Fireplaces (hint: create a new data frame for each number of Fireplaces). Colour these with different transparent colours for each number of Fireplaces and plot them together on the same axes. Put the actual data on the plot, coloured to match the bands, and jittered in position to make it possible to see all points. Ensure you have an informative main plot title, axes labels and a legend. (7 points)
+```{r}
+ggplot(Ames3, aes(x=Lot_Frontage, y=as.numeric
+                  (as.factor(excellent_heating))-1)) +
+  geom_smooth(method=glm, aes(colour=Fireplaces, fill=Fireplaces)) +
+  #adding - geom_point(position = "jitter") + - made the graph look messy 
+  #so ommitted.
+  labs(x="Lot Frontage", y="Likliehood of Excellent Heating") +
+  ggtitle("Confidence Bands for Excellent Heating as a Function
+        of Lot Frontage by Number of Fireplaces") +
+  theme(plot.title = element_text(size = 10))
+```
+
+c. Split the data using set.seed(120) and rebuild the model on 80% of the data. Cross validate on the remaining 20%. Plot the ROCs for both data and comment on your findings. (6 points)
+```{r}
+library("caret")
+
+#split the data and rebuilt model on 80% of data
+set.seed(120)
+training.samples <- c(Ames3$excellent_heating) %>%
+  createDataPartition(p = 0.8, list = FALSE)
+train.data <- Ames3[training.samples, ]
+test.data <- Ames3[-training.samples, ]
+
+```
+
+```{r}
+#then created the a new model on the training data
+train.model <- glm(as.factor(excellent_heating)~Lot_Frontage + Fireplaces,
+             family="binomial",data=train.data)
+```
+
+```{r}
+predtrain <- predict(train.model,type="response") 
+predtest <- predict(train.model,newdata=test.data,type="response")
+```
+
+```{r}
+roctrain <- roc(response=train.data$excellent_heating,predictor=predtrain,
+                plot=TRUE,
+                main="ROC Curve",auc=TRUE)
+
+roc(response=test.data$excellent_heating,predictor=predtest,
+     plot=TRUE,auc=TRUE,add=TRUE,col=2)
+ 
+legend(0.2,0.6,legend=c("training","testing"),fill=1:2)
+
+```
+  The graph shows that the two lines are fairly similar, meaning that the testing data is not overfitted to the training data.
+
+# 4. Multinomial Regression
+
+a. For the dataset “Ames”, create a model multregmod to predict BsmtFin_Type_1 (Rating of basement finished area) from Total_Bsmt_SF and Year_Remod_Add Remodel date (same as construction date if no remodeling or additions). (3 points)
+```{r}
+multregmod <- multinom(BsmtFin_Type_1~Total_Bsmt_SF+Year_Remod_Add,data=Ames)
+multregmod
+
+predict(multregmod,type="probs")[1,]
+```
+
+b. Write out the formulas for this model in terms of P(No_Basement), P(Unf) P(Rec),P(BLQ), P(GLQ), P(LwQ),
+You may round coefficients to 3 dp. (4 points)
+  
+$$
+\begin{align}
+\mbox{logit(P(BLQ))} \ =   
+&\ 34.465 + 0.00006282504\times {\rm Total\ Bsmt\ SF}\ +\\
+&-0.018\times {\rm Year\ Remod\ Add. }\\ 
+\\
+\mbox{logit(P(GLQ))} \ =   
+&\ -105.324 + 0.001030040\times {\rm Total\ Bsmt\ SF}\ +\\
+&0.053\times {\rm Year\ Remod\ Add. }\\ 
+\\
+\mbox{logit(P(LwQ))} \ =   
+&\ 39.567 + 0.00001243787\times {\rm Total\ Bsmt\ SF}\ +\\
+&-0.021\times {\rm Year\ Remod\ Add. }\\ 
+\\
+\mbox{logit(P(No Basement))} \ =   
+&\ 4.876 + -0.1729079\times {\rm Total\ Bsmt\ SF}\ +\\
+&0.004\times {\rm Year\ Remod\ Add. }\\ 
+\\
+\mbox{logit(P(Rec))} \ =   
+&\ 56.711 + 0.000001596801\times {\rm Total\ Bsmt\ SF}\ +\\
+&-0.029\times {\rm Year\ Remod\ Add. }\\ 
+\\
+\mbox{logit(P(Unf))} \ =   
+&\ -29.377 + -0.0006987213\times {\rm Total\ Bsmt\ SF}\ +\\
+&0.016\times {\rm Year\ Remod\ Add. }\\ 
+\\
+P(ALQ)\ = &\ 1- P(BLQ)\ - P(GLQ)\ - \\
+&P(LwQ)\ - P(No\ Basement)\ - \\
+&P(Rec)\ -P(Unf).
+\end{align}
+$$
+
+c. Evaluate the performance of this model using a confusion matrix and by calculating the sum of sensitivities for the model. Comment on your findings. (4 points)
+```{r}
+multitable <- table(Ames$BsmtFin_Type_1,predict(multregmod,type="class"))
+names(dimnames(multitable))<- list("Actual","Predicted")
+multitable
+```
+  Sum of sensitivities:
+  Sensitivity (ALQ) = (1/429)x100 = 0.2%
+  Sensitivity (BLQ) = (0/269)x100 = 0%
+  Sensitivity (GLQ) = (579/859)x100 = 67%
+  Sensitivity (LwQ) = (0/154)x100 = 0%
+  Sensitivity (No_Basement) = (80/80)x100 = 100%
+  Sensitivity (Rec) = (46/288)x100 = 16%
+  Sensitivity (Unf) = (478/851)x100 = 56%
+
+  Based on the confusion matrix's evaluation of the models performance, it hasn't performed well at predicting BLQ(0%), LwQ(0%), ALQ(0.2%), Rec(16%) quality basements this could be due to so few or none existent basements being of these level qualities. Unf(56%) were predicted fairly well and GLQ(67%) basements were predicted well at almost 70%. Most well predicted basement quality type was  No_Basement(100%) which was predicted correctly 100% of the time. All in all the model could be improved upon to accurately predict more factors, this could be done through weighting the probabilities.
+
+# 5. Poisson/quasipoisson Regression
+a. For the “footballer_data” dataset, create a model appearances_mod to predict the total number of overall appearances a player had based on position and age. (2 points)
+```{r}
+appearances_mod_poisson <- glm(appearances_overall ~ age +
+                   position, data=footballer_data,family="poisson")
+summary(appearances_mod_poisson)
+
+#A poisson model showed high overdisperion meaning that the variance is greater than the mean therefore a quasipoisson model was used.
+
+appearances_mod <- glm(appearances_overall ~ age +
+                   position, data=footballer_data,family="quasipoisson")
+summary(appearances_mod)
+```
+  For every increase in year for age, appearances overall are expected to increase by 0.044. 
+
+b. Check the assumption of the model using a diagnostic plot and comment on your findings. (3 points)
+```{r}
+plot(appearances_mod, which=3)
+abline(h=0.8,col=3)
+#show under dispersion as the red line crosses under the green line.
+
+plot(appearances_mod, which=1)
+#The data does not appear to meet the assumption of linearity
+
+plot(appearances_mod,which=2)
+#The data appears to meet the assumption of independence
+
+```
+
+c. What do the coefficients of the model tell us about? which position has the most appearances? How many times more appearances do forwards get on average than goalkeepers? (3 points)
+
+  Midfielders have the most appearances with a coefficient of 0.118 followed by forwards with 0.111 and goalkeepers with -0.365. 
+
+
